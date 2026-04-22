@@ -9,8 +9,8 @@ venv/
 # Streamlit
 .streamlit/secrets.toml
 
-# Assets gerados automaticamente
-assets/logo_premiatto.png
+# Assets — PDF original não versionado (PNG commitado)
+assets/Logo_GPRemiatto.pdf
 
 # OS
 .DS_Store
