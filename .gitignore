@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+.venv/
+venv/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Assets gerados automaticamente
+assets/logo_premiatto.png
+
+# OS
+.DS_Store
+Thumbs.db
