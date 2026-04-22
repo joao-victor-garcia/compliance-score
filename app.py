@@ -8,6 +8,7 @@ Dependências:
     pip install streamlit pdfplumber anthropic reportlab pymupdf
 """
 
+import hashlib
 import os
 import re
 import time
@@ -1251,7 +1252,60 @@ def generate_pdf_report(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 7. INTERFACE STREAMLIT
+# 7. AUTENTICAÇÃO
+# ═════════════════════════════════════════════════════════════════════════════
+
+_CREDENTIALS = {
+    "compliance.joaogarcia@bancopremiatto.com.br":
+        "6c95e1a64c36008239a4d9bedbb674b38bef6c59f7bcb922b6a51a0849a94df6",
+}
+
+
+def _hash(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def _login_page(logo_png: Optional[str]) -> None:
+    st.markdown("""
+    <style>
+    .stApp { background: #f0f4f8 !important; }
+    .login-card {
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 2.5rem 2.5rem 2rem;
+        box-shadow: 0 4px 24px rgba(26,54,93,0.12);
+        max-width: 420px;
+        margin: 0 auto;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    _, col, _ = st.columns([1, 2, 1])
+    with col:
+        if logo_png:
+            st.image(logo_png, use_container_width=True)
+        else:
+            st.markdown("<h2 style='text-align:center;color:#1a365d;'>Garantidora Premiatto</h2>", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        with st.form("login_form"):
+            email    = st.text_input("E-mail", placeholder="seu@email.com.br")
+            password = st.text_input("Senha", type="password", placeholder="••••••••")
+            entrar   = st.form_submit_button("Entrar", use_container_width=True)
+
+        if entrar:
+            email = email.strip().lower()
+            if email in _CREDENTIALS and _CREDENTIALS[email] == _hash(password):
+                st.session_state["authenticated"] = True
+                st.session_state["user_email"]    = email
+                st.rerun()
+            else:
+                st.error("E-mail ou senha incorretos.")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 8. INTERFACE STREAMLIT
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _get_logo_png() -> Optional[str]:
@@ -1285,6 +1339,12 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
 
+    logo_png = _get_logo_png()
+
+    if not st.session_state.get("authenticated"):
+        _login_page(logo_png)
+        st.stop()
+
     st.markdown("""
     <style>
     /* ── Página principal ── */
@@ -1314,6 +1374,11 @@ def main() -> None:
         font-size: 1rem !important; letter-spacing: 0.02em !important;
         box-shadow: 0 2px 8px rgba(26,54,93,0.25) !important;
         transition: opacity .2s !important;
+    }
+    div[data-testid="stButton"] > button p,
+    div[data-testid="stButton"] > button span,
+    div[data-testid="stButton"] > button div {
+        color: #ffffff !important;
     }
     div[data-testid="stButton"] > button:hover { opacity: 0.88 !important; }
 
@@ -1384,8 +1449,6 @@ def main() -> None:
     </style>
     """, unsafe_allow_html=True)
 
-    logo_png = _get_logo_png()
-
     # ── Cabeçalho principal ───────────────────────────────────────────────────
     st.markdown("""
     <div class="header-principal" style="background:linear-gradient(135deg,#1a365d,#2b6cb0);
@@ -1402,10 +1465,15 @@ def main() -> None:
 
     # ── Barra lateral ─────────────────────────────────────────────────────────
     with st.sidebar:
-        # Logo na sidebar
         if logo_png:
             st.image(logo_png, use_container_width=True)
             st.markdown("---")
+        user_email = st.session_state.get("user_email", "")
+        st.markdown(f"<small style='color:#718096;'>Logado como<br><b>{user_email}</b></small>", unsafe_allow_html=True)
+        if st.button("Sair", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
+        st.markdown("---")
         st.markdown("### 📂 Relatórios Bureau")
         st.markdown("---")
         serasa_pf_file = st.file_uploader("Serasa PF — Pessoa Física",  type=["pdf"])
@@ -1436,10 +1504,31 @@ def main() -> None:
 
         st.markdown("---")
         st.markdown("### 💰 Parâmetros da Garantia")
-        valor_garantia = st.number_input(
+
+        def _fmt_valor():
+            val = st.session_state.get("_valor_str", "").strip()
+            digits = re.sub(r"[^\d]", "", val)
+            if digits:
+                num = int(digits)
+                st.session_state["_valor_str"] = (
+                    f"{num:,}".replace(",", ".") + ",00"
+                )
+
+        if "_valor_str" not in st.session_state:
+            st.session_state["_valor_str"] = "100.000,00"
+
+        st.text_input(
             "Valor da Garantia (R$)",
-            min_value=0.0, value=100_000.0, step=5_000.0, format="%.2f",
+            key="_valor_str",
+            on_change=_fmt_valor,
+            placeholder="Ex: 1.000.000,00",
         )
+
+        try:
+            _digits = re.sub(r"[^\d]", "", st.session_state["_valor_str"])
+            valor_garantia = float(_digits) if _digits else 0.0
+        except Exception:
+            valor_garantia = 0.0
         tempo_vigencia = st.number_input(
             "Tempo de Vigência (meses)",
             min_value=1, max_value=360, value=12, step=1,
