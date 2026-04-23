@@ -555,6 +555,7 @@ def generate_technical_opinion(
     data: dict,
     indices: Optional[dict] = None,
     avaliacao_bp: Optional[dict] = None,
+    finalidade_text: Optional[str] = None,
 ) -> str:
     if not ANTHROPIC_OK:
         return "❌ Biblioteca `anthropic` não instalada. Execute: `pip install anthropic`"
@@ -637,6 +638,15 @@ ANÁLISE FINANCEIRA — DRE / BALANÇO (Peso 40%)
     else:
         dre_bloco = ""
 
+    if finalidade_text:
+        _trunc = finalidade_text[:3000] + ("...[truncado]" if len(finalidade_text) > 3000 else "")
+        _finalidade_bloco = (
+            "\n---\nFINALIDADE DO USO DO RECURSO (contexto qualitativo)\n"
+            "---\n" + _trunc + "\n---\n"
+        )
+    else:
+        _finalidade_bloco = ""
+
     prompt = f"""Você é um analista de risco sênior de uma garantidora brasileira.
 Com base exclusivamente nos dados abaixo, redija um PARECER TÉCNICO formal em português.
 
@@ -673,8 +683,8 @@ RESULTADO FINAL
   Classificação                : {data.get('classificacao', 'N/D')}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONVENÇÃO DAS ESCALAS — LEIA ANTES DE REDIGIR
+{_finalidade_bloco}
+CONVENCAO DAS ESCALAS - LEIA ANTES DE REDIGIR
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 • Serasa (PF e PJ): escala 0–1000. Quanto MAIOR o score, MENOR o risco de inadimplência.
   Ex.: score 800 = excelente; score 200 = alto risco.
@@ -719,6 +729,7 @@ def generate_txt_report(
     parecer: str,
     indices: Optional[dict] = None,
     avaliacao_bp: Optional[dict] = None,
+    finalidade_text: Optional[str] = None,
 ) -> str:
     ts      = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     fat_min = data.get("faturamento_min") or 0
@@ -814,6 +825,12 @@ AVALIAÇÃO DO BUSINESS PLAN
         "Padrão (Bureau + Capacidade)"
     )
 
+    if finalidade_text:
+        _trunc_f = finalidade_text[:2000] + ("...[texto truncado]" if len(finalidade_text) > 2000 else "")
+        _fin_bloco_txt = "\nFINALIDADE DO USO DO RECURSO\n" + _trunc_f + "\n"
+    else:
+        _fin_bloco_txt = ""
+
     return f"""\
 ================================================================================
          RELATÓRIO DE ANÁLISE DE RISCO — GARANTIDORA
@@ -830,7 +847,7 @@ BUREAU — SCORES EXTRAÍDOS
   Score Serasa PJ              : {str(data.get('score_serasa_pj', 'Não extraído')):>6}  / 1000
   Score Compliance Neoway (orig): {str(data.get('score_neoway_original', 'Não extraído')):>6}  / 100
   Faturamento Estimado         : R$ {fat_min:,.2f} a R$ {fat_max:,.2f}
-{dre_bloco}{bp_bloco}
+{dre_bloco}{bp_bloco}{_fin_bloco_txt}
 CAPACIDADE DE PAGAMENTO
   Faturamento Mensal           : R$ {fat_m:,.2f}
   Capacidade Total no Período  : R$ {cap:,.2f}
@@ -994,6 +1011,7 @@ def generate_pdf_report(
     parecer: str,
     indices: Optional[dict] = None,
     avaliacao_bp: Optional[dict] = None,
+    finalidade_text: Optional[str] = None,
 ) -> Optional[BytesIO]:
     if not REPORTLAB_OK:
         return None
@@ -1117,6 +1135,18 @@ def generate_pdf_report(
             ("PADDING",    (0, 0), (-1,-1), 6),
         ]))
         story += [it, Spacer(1, 10)]
+
+    # Finalidade do Recurso
+    if finalidade_text:
+        story += [
+            Paragraph("Finalidade do Uso do Recurso", h2_s),
+            Spacer(1, 4),
+        ]
+        for linha in finalidade_text[:3000].split("\n"):
+            linha = linha.strip()
+            if linha:
+                story.append(Paragraph(_md_to_xml(linha), body_s))
+        story.append(Spacer(1, 10))
 
     # Business Plan
     if avaliacao_bp:
@@ -1511,6 +1541,15 @@ def main() -> None:
         if bp_file:
             st.success("Business Plan carregado")
 
+        finalidade_file = st.file_uploader(
+            "Finalidade do Recurso",
+            type=["pdf"],
+            help="Documento descrevendo a finalidade do uso da garantia. "
+                 "Usado como contexto qualitativo pela IA no parecer.",
+        )
+        if finalidade_file:
+            st.success("Finalidade do recurso carregada")
+
         st.markdown("---")
         st.markdown("### 💰 Parâmetros da Garantia")
 
@@ -1694,7 +1733,18 @@ def main() -> None:
             st.warning("⚠️ Business Plan: PDF sem texto extraível.")
         results["modo_bp"] = avaliacao_bp is not None
 
-    # 6 — Normalização Bureau
+    # 6 — Finalidade do Recurso (contexto qualitativo para a IA)
+    finalidade_text: Optional[str] = None
+    if finalidade_file:
+        msg.text("📝 Extraindo finalidade do recurso…")
+        prog.progress(62)
+        finalidade_text = extract_text_from_pdf(finalidade_file)
+        if finalidade_text:
+            st.info("Finalidade do recurso extraída e será usada como contexto no parecer.")
+        else:
+            st.warning("⚠️ Finalidade do Recurso: PDF sem texto extraível.")
+
+    # 7 — Normalização Bureau
     msg.text("🧮 Normalizando scores de bureau…")
     prog.progress(65)
 
@@ -1796,7 +1846,7 @@ def main() -> None:
     # 8 — Parecer IA
     msg.text("🤖 Gerando parecer técnico com IA…")
     prog.progress(93)
-    parecer = generate_technical_opinion(results, indices, avaliacao_bp)
+    parecer = generate_technical_opinion(results, indices, avaliacao_bp, finalidade_text)
 
     prog.progress(100)
     msg.text("✅ Análise concluída!")
@@ -2122,7 +2172,7 @@ def main() -> None:
     dl1, dl2 = st.columns(2)
 
     with dl1:
-        txt_report = generate_txt_report(results, parecer, indices, avaliacao_bp)
+        txt_report = generate_txt_report(results, parecer, indices, avaliacao_bp, finalidade_text)
         st.download_button(
             "📄 Baixar Relatório (.txt)",
             data=txt_report,
@@ -2132,7 +2182,7 @@ def main() -> None:
         )
     with dl2:
         if REPORTLAB_OK:
-            pdf_buf = generate_pdf_report(results, parecer, indices, avaliacao_bp)
+            pdf_buf = generate_pdf_report(results, parecer, indices, avaliacao_bp, finalidade_text)
             if pdf_buf:
                 st.download_button(
                     "📑 Baixar Relatório (.pdf)",
