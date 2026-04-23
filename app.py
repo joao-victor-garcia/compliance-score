@@ -42,6 +42,15 @@ try:
 except ImportError:
     ANTHROPIC_OK = False
 
+# Carrega a chave Anthropic do st.secrets (local: .streamlit/secrets.toml;
+# Cloud: painel Secrets do Streamlit). Fallback para variável de ambiente.
+try:
+    _secret_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+    if _secret_key:
+        os.environ["ANTHROPIC_API_KEY"] = _secret_key
+except Exception:
+    pass
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 1. EXTRAÇÃO DE TEXTO DOS PDFs
@@ -1540,16 +1549,6 @@ def main() -> None:
             "Tempo de Vigência (meses)",
             min_value=1, max_value=360, value=12, step=1,
         )
-
-        st.markdown("---")
-        st.markdown("### 🔑 API Anthropic")
-        api_key_input = st.text_input(
-            "ANTHROPIC_API_KEY (opcional)",
-            type="password",
-            help="Deixe em branco se já configurada como variável de ambiente.",
-        )
-        if api_key_input:
-            os.environ["ANTHROPIC_API_KEY"] = api_key_input
 
         st.markdown("---")
         processar = st.button("🚀 Processar e Calcular Risco")
