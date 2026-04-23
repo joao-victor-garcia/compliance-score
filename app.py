@@ -1505,11 +1505,19 @@ def main() -> None:
         st.markdown("---")
         st.markdown("### 💰 Parâmetros da Garantia")
 
+        def _parse_br(s: str) -> float:
+            """'6.800.000,00' → 6800000.0"""
+            return float(s.replace(".", "").replace(",", "."))
+
         def _fmt_valor():
             val = st.session_state.get("_valor_str", "").strip()
-            digits = re.sub(r"[^\d]", "", val)
-            if digits:
-                num = int(digits)
+            try:
+                num = int(_parse_br(val))
+            except (ValueError, AttributeError):
+                # Fallback: só dígitos (usuário digitou sem formatação)
+                digits = re.sub(r"[^\d]", "", val)
+                num = int(digits) if digits else 0
+            if num >= 0:
                 st.session_state["_valor_str"] = (
                     f"{num:,}".replace(",", ".") + ",00"
                 )
@@ -1525,8 +1533,7 @@ def main() -> None:
         )
 
         try:
-            _digits = re.sub(r"[^\d]", "", st.session_state["_valor_str"])
-            valor_garantia = float(_digits) if _digits else 0.0
+            valor_garantia = _parse_br(st.session_state["_valor_str"])
         except Exception:
             valor_garantia = 0.0
         tempo_vigencia = st.number_input(
