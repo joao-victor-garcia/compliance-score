@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.ai_engine import (
     BP_DIMENSOES,
@@ -126,6 +127,49 @@ h1, h2, h3 { color: #1a365d !important; }
 </style>
 """
 
+_DOTS_JS = """
+<script>
+(function () {
+    if (window.parent._stDotsActive) return;
+    window.parent._stDotsActive = true;
+
+    var p = window.parent.document;
+    var dots = 1;
+    var timer = null;
+
+    function tick() {
+        var w = p.querySelector('[data-testid="stStatusWidget"]');
+        if (!w) return;
+        var c = w.querySelector('._stDots');
+        if (!c) {
+            c = p.createElement('span');
+            c.className = '_stDots';
+            c.style.cssText = 'font-family:monospace;font-size:15px;color:#4a5568;display:inline-block;min-width:22px;';
+            Array.from(w.children).forEach(function (el) {
+                el.style.visibility = 'hidden';
+                el.style.position = 'absolute';
+            });
+            w.style.position = 'relative';
+            w.appendChild(c);
+        }
+        c.textContent = '.'.repeat(dots);
+        dots = dots % 3 + 1;
+    }
+
+    new p.MutationObserver(function () {
+        var w = p.querySelector('[data-testid="stStatusWidget"]');
+        if (w && !timer) {
+            timer = setInterval(tick, 450);
+        } else if (!w && timer) {
+            clearInterval(timer);
+            timer = null;
+            dots = 1;
+        }
+    }).observe(p.body, { childList: true, subtree: true });
+})();
+</script>
+"""
+
 
 def _get_logo_png() -> Optional[str]:
     """Converte Logo_GPRemiatto.pdf -> PNG na pasta assets e retorna o caminho."""
@@ -165,16 +209,17 @@ def main() -> None:
         st.stop()
 
     st.markdown(_CSS, unsafe_allow_html=True)
+    components.html(_DOTS_JS, height=0, scrolling=False)
 
     st.markdown("""
     <div class="header-principal" style="background:linear-gradient(135deg,#1a365d,#2b6cb0);
                 border-radius:14px; padding:1.4rem 2rem; margin-bottom:1.5rem;
                 box-shadow:0 4px 16px rgba(26,54,93,0.18);">
         <h1 style="color:#ffffff !important;margin:0;font-size:1.75rem;font-weight:800;">
-            🏦 Sistema de Compliance e Risco
+            Sistema de Compliance e  Análise de Risco
         </h1>
         <p style="color:#ffffff !important;margin:0.3rem 0 0;font-size:0.95rem;">
-            Analise automatizada de garantias · Garantidora Premiatto
+            Análise automatizada de garantias · Garantidora Premiatto
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -261,7 +306,7 @@ def main() -> None:
         )
 
         st.markdown("---")
-        processar = st.button("🚀 Processar e Calcular Risco")
+        processar = st.button("Processar e Calcular risco")
 
     # ── Estado inicial ────────────────────────────────────────────────────────
     if not processar:
@@ -270,11 +315,11 @@ def main() -> None:
         c2.info("**2.** Informe valor da garantia e vigencia")
         c3.info("**3.** Clique em **Processar e Calcular Risco**")
 
-        with st.expander("ℹ️ Metodologia de Calculo"):
+        with st.expander("Metodologia de Cálculo"):
             st.markdown("""
 **Modo Padrao** (sem DRE):
 
-| Componente | Fonte | Peso | Normalizacao |
+| Componente | Fonte | Peso | Normalização |
 |---|---|---|---|
 | Saude Financeira | Serasa PF/PJ | **40 %** | `Score / 10` |
 | Compliance | Neoway | **30 %** | `100 - Score` (inversao) |
@@ -282,7 +327,7 @@ def main() -> None:
 
 ---
 
-**Modo Analise Financeira** (com DRE/Balanco):
+**Modo Analise Financeira** (com DRE/Balanço):
 
 | Componente | Fonte | Peso |
 |---|---|---|
@@ -290,7 +335,7 @@ def main() -> None:
 | Indices Financeiros | DRE / Balanco | **40 %** |
 | Capacidade de Pagamento | Neoway (Faturamento) | **30 %** |
 
-**Classificacao de Risco:**
+**Classificação de Risco:**
 
 | Score | Nivel |
 |---|---|
@@ -304,6 +349,13 @@ def main() -> None:
     # ── Pipeline de processamento ─────────────────────────────────────────────
     prog = st.progress(0)
     msg  = st.empty()
+
+    _step = [0]
+
+    def _loading(text: str) -> None:
+        dots = "." * (_step[0] % 3 + 1)
+        msg.markdown(f"**{text}**{dots}")
+        _step[0] += 1
 
     results: dict = {
         "valor_garantia":        valor_garantia,
@@ -329,19 +381,19 @@ def main() -> None:
     indices:      Optional[dict] = None
     avaliacao_bp: Optional[dict] = None
 
-    msg.text("📄 Extraindo Serasa PF...")
+    _loading("Extraindo Serasa PF")
     prog.progress(8)
     if serasa_pf_file:
         txt = extract_text_from_pdf(serasa_pf_file)
         results["score_serasa_pf"] = extract_serasa_score(txt)
 
-    msg.text("📄 Extraindo Serasa PJ...")
+    _loading("Extraindo Serasa PJ")
     prog.progress(18)
     if serasa_pj_file:
         txt = extract_text_from_pdf(serasa_pj_file)
         results["score_serasa_pj"] = extract_serasa_score(txt)
 
-    msg.text("📄 Extraindo Neoway Due Diligence...")
+    _loading("Extraindo Neoway Due Diligence")
     prog.progress(30)
     if neoway_file:
         txt = extract_text_from_pdf(neoway_file)
@@ -349,14 +401,14 @@ def main() -> None:
         results["faturamento_min"], results["faturamento_max"] = extract_neoway_faturamento(txt)
 
     if dre_file:
-        msg.text("📊 Extraindo DRE / Balanco Patrimonial...")
+        _loading("Extraindo DRE / Balanco Patrimonial")
         prog.progress(45)
         txt_dre   = extract_text_from_pdf(dre_file)
         dados_dre = extract_dre_balanco(txt_dre)
         for k, v in dados_dre.items():
             results[k] = v
 
-        msg.text("🧮 Calculando indices financeiros...")
+        _loading("Calculando indices financeiros")
         prog.progress(55)
         indices = calcular_indices_financeiros(dados_dre, valor_garantia)
 
@@ -368,7 +420,7 @@ def main() -> None:
             st.warning(f"Campos nao extraidos do DRE: **{', '.join(nao_extraidos)}**. Verifique se o PDF contem texto pesquisavel.")
 
     if bp_file:
-        msg.text("📋 Avaliando Business Plan com IA...")
+        _loading("Avaliando Business Plan com IA")
         prog.progress(58)
         txt_bp = extract_text_from_pdf(bp_file)
         if txt_bp:
@@ -383,7 +435,7 @@ def main() -> None:
 
     finalidade_text: Optional[str] = None
     if finalidade_file:
-        msg.text("📝 Extraindo finalidade do recurso...")
+        _loading("Extraindo finalidade do recurso")
         prog.progress(62)
         finalidade_text = extract_text_from_pdf(finalidade_file)
         if finalidade_text:
@@ -391,7 +443,7 @@ def main() -> None:
         else:
             st.warning("Finalidade do Recurso: PDF sem texto extraivel.")
 
-    msg.text("🧮 Normalizando scores de bureau...")
+    _loading("Normalizando scores de bureau")
     prog.progress(65)
     serasa_vals = [v for v in [results["score_serasa_pf"], results["score_serasa_pj"]] if v is not None]
     if serasa_vals:
@@ -404,7 +456,7 @@ def main() -> None:
     else:
         st.warning("Score Neoway nao encontrado. Atribuindo 0 pts.")
 
-    msg.text("💰 Calculando capacidade de pagamento...")
+    _loading("Calculando capacidade de pagamento")
     prog.progress(72)
     results["pontos_capacidade"] = calculate_payment_capacity(
         results["faturamento_max"], valor_garantia, tempo_vigencia,
@@ -412,7 +464,7 @@ def main() -> None:
     if results["faturamento_max"] is None:
         st.warning("Faturamento nao encontrado. Atribuindo 0 pts.")
 
-    msg.text("📈 Calculando score final...")
+    _loading("Calculando score final")
     prog.progress(84)
 
     ps, pn = results["pontos_serasa"], results["pontos_neoway"]
@@ -481,12 +533,12 @@ def main() -> None:
     results["classificacao"] = f"{emoji_map.get(label, '')} {label}"
     results["cor"]           = cor
 
-    msg.text("🤖 Gerando parecer tecnico com IA...")
+    _loading("Gerando parecer tecnico com IA")
     prog.progress(93)
     parecer = generate_technical_opinion(results, indices, avaliacao_bp, finalidade_text)
 
     prog.progress(100)
-    msg.text("Analise concluida!")
+    msg.markdown("**Analise concluida!**")
     time.sleep(0.8)
     prog.empty()
     msg.empty()
