@@ -3,6 +3,7 @@ ui/interface.py
 Interface Streamlit principal: sidebar, pipeline de processamento e exibicao de resultados.
 """
 
+import base64
 import re
 import time
 from datetime import datetime
@@ -118,6 +119,17 @@ h1, h2, h3 { color: #1a365d !important; }
     border-radius: 8px !important;
 }
 
+[data-testid="stSidebar"] [data-testid="StyledFullScreenButton"],
+[data-testid="stSidebar"] [data-testid="stImage"] button,
+[data-testid="stSidebar"] .stImage button,
+[data-testid="stSidebar"] button[title="View fullscreen"],
+[data-testid="stSidebar"] button[title="Fullscreen"] {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
 [data-testid="stNumberInput"] input {
     background: #f7fafc !important;
     border: 1px solid #cbd5e0 !important;
@@ -227,7 +239,11 @@ def main() -> None:
     # ── Sidebar ───────────────────────────────────────────────────────────────
     with st.sidebar:
         if logo_png:
-            st.image(logo_png, use_container_width=True)
+            _img_b64 = base64.b64encode(Path(logo_png).read_bytes()).decode()
+            st.markdown(
+                f'<img src="data:image/png;base64,{_img_b64}" style="width:100%;display:block;">',
+                unsafe_allow_html=True,
+            )
             st.markdown("---")
 
         user_email = st.session_state.get("user_email", "")
@@ -240,10 +256,25 @@ def main() -> None:
             st.rerun()
 
         st.markdown("---")
-        st.markdown("### 📂 Relatorios Bureau")
+        st.markdown("### 👤 Identificação do Solicitante")
+        nome_solicitante = st.text_input(
+            "Nome da PF / PJ",
+            placeholder="Ex: João da Silva ou Empresa Ltda",
+        )
+
+        tipo_pessoa = st.radio(
+            "Selecione o tipo de análise",
+            options=["Pessoa Física", "Pessoa Jurídica"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        is_pj = tipo_pessoa == "Pessoa Jurídica"
+
+        st.markdown("---")
+        st.markdown("### 📂 Relatórios")
         st.markdown("---")
         serasa_pf_file = st.file_uploader("Serasa PF - Pessoa Fisica",  type=["pdf"])
-        serasa_pj_file = st.file_uploader("Serasa PJ - Pessoa Juridica", type=["pdf"])
+        serasa_pj_file = st.file_uploader("Serasa PJ - Pessoa Juridica", type=["pdf"]) if is_pj else None
         neoway_file    = st.file_uploader("Due Diligence Neoway",         type=["pdf"])
 
         st.markdown("---")
@@ -271,6 +302,21 @@ def main() -> None:
 
         st.markdown("---")
         st.markdown("### 💰 Parametros da Garantia")
+
+        modalidade = st.selectbox(
+            "Modalidade",
+            options=["Financeira", "Processual", "Contratual"],
+            help="Financeira: análise padrão. Processual/Contratual: exige documento do processo ou contrato.",
+        )
+
+        documento_modal_file = None
+        if modalidade in ("Processual", "Contratual"):
+            _label_doc = "Documento do Processo (PDF) *" if modalidade == "Processual" else "Documento do Contrato (PDF) *"
+            documento_modal_file = st.file_uploader(_label_doc, type=["pdf"])
+            if documento_modal_file:
+                st.success(f"Documento {modalidade.lower()} carregado")
+            else:
+                st.warning(f"⚠️ Documento obrigatório para modalidade {modalidade}.")
 
         def _parse_br(s: str) -> float:
             return float(s.replace(".", "").replace(",", "."))
@@ -312,7 +358,7 @@ def main() -> None:
     if not processar:
         c1, c2, c3 = st.columns(3)
         c1.info("**1.** Faca upload dos PDFs no painel lateral")
-        c2.info("**2.** Informe valor da garantia e vigencia")
+        c2.info("**2.** Informe modalidade, valor e vigência da garantia")
         c3.info("**3.** Clique em **Processar e Calcular Risco**")
 
         with st.expander("Metodologia de Cálculo"):
@@ -358,6 +404,9 @@ def main() -> None:
         _step[0] += 1
 
     results: dict = {
+        "tipo_pessoa":           tipo_pessoa,
+        "nome_solicitante":      nome_solicitante.strip() or "Sem Nome",
+        "modalidade":            modalidade,
         "valor_garantia":        valor_garantia,
         "tempo_vigencia":        tempo_vigencia,
         "score_serasa_pf":       None,
@@ -442,6 +491,16 @@ def main() -> None:
             st.info("Finalidade do recurso extraida e sera usada como contexto no parecer.")
         else:
             st.warning("Finalidade do Recurso: PDF sem texto extraivel.")
+
+    documento_modal_text: Optional[str] = None
+    if documento_modal_file:
+        _loading(f"Extraindo documento {modalidade.lower()}")
+        prog.progress(64)
+        documento_modal_text = extract_text_from_pdf(documento_modal_file)
+        if documento_modal_text:
+            st.info(f"Documento {modalidade} extraido e sera analisado no parecer.")
+        else:
+            st.warning(f"Documento {modalidade}: PDF sem texto extraivel.")
 
     _loading("Normalizando scores de bureau")
     prog.progress(65)
@@ -535,7 +594,7 @@ def main() -> None:
 
     _loading("Gerando parecer tecnico com IA")
     prog.progress(93)
-    parecer = generate_technical_opinion(results, indices, avaliacao_bp, finalidade_text)
+    parecer = generate_technical_opinion(results, indices, avaliacao_bp, finalidade_text, documento_modal_text)
 
     prog.progress(100)
     msg.markdown("**Analise concluida!**")
@@ -545,16 +604,53 @@ def main() -> None:
 
     # ── Exibicao dos Resultados ───────────────────────────────────────────────
     _render_results(results, indices, avaliacao_bp, finalidade_text, parecer,
-                    tem_dre, tem_bp, valor_garantia, tempo_vigencia)
+                    tem_dre, tem_bp, valor_garantia, tempo_vigencia,
+                    results["nome_solicitante"])
 
 
 def _render_results(
     results, indices, avaliacao_bp, finalidade_text, parecer,
-    tem_dre, tem_bp, valor_garantia, tempo_vigencia,
+    tem_dre, tem_bp, valor_garantia, tempo_vigencia, nome_solicitante="",
 ):
     """Renderiza a secao de resultados apos o processamento."""
     st.markdown("## 📊 Resultado da Analise")
     modo_dre = results["modo_dre"]
+
+    # Cabeçalho — Dados da Solicitação
+    _modalidade = results.get("modalidade", "Financeira")
+    _tipo_p     = results.get("tipo_pessoa", "")
+    _vg         = results.get("valor_garantia", 0)
+    _tv         = results.get("tempo_vigencia", 0)
+    _modal_icons = {"Financeira": "💵", "Processual": "⚖️", "Contratual": "📝"}
+    _modal_icon  = _modal_icons.get(_modalidade, "")
+    st.markdown(f"""
+    <div style="background:#ffffff;border:1px solid #dde3ed;border-radius:10px;
+                padding:1rem 1.5rem;margin-bottom:1rem;
+                box-shadow:0 1px 4px rgba(0,0,0,.05);">
+        <div style="font-size:0.7rem;color:#718096;font-weight:700;
+                    text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.5rem;">
+            Dados da Solicitação
+        </div>
+        <div style="display:flex;gap:2.5rem;flex-wrap:wrap;align-items:center;">
+            <div>
+                <span style="font-size:0.75rem;color:#718096;">Tipo de Pessoa</span><br>
+                <span style="font-weight:700;color:#1a365d;">{_tipo_p}</span>
+            </div>
+            <div>
+                <span style="font-size:0.75rem;color:#718096;">Modalidade</span><br>
+                <span style="font-weight:700;color:#1a365d;">{_modal_icon} {_modalidade}</span>
+            </div>
+            <div>
+                <span style="font-size:0.75rem;color:#718096;">Valor Solicitado</span><br>
+                <span style="font-weight:700;color:#1a365d;">R$ {_vg:,.2f}</span>
+            </div>
+            <div>
+                <span style="font-size:0.75rem;color:#718096;">Vigência</span><br>
+                <span style="font-weight:700;color:#1a365d;">{_tv} meses</span>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     if tem_dre and tem_bp:
         st.info("**Metodologia Completa ativa** - DRE + Business Plan: Bureau 20% | Fin 30% | Cap 20% | BP 30%")
@@ -755,12 +851,15 @@ def _render_results(
     # Downloads
     st.markdown("---")
     st.markdown("### 📥 Download do Relatorio")
+    _nome_arquivo = re.sub(r'[\\/*?:"<>|]', "", nome_solicitante).strip() or "Sem Nome"
+    _base_nome = f"Relatório de Compliance externo - {_nome_arquivo}"
+
     dl1, dl2 = st.columns(2)
     with dl1:
         txt_report = generate_txt_report(results, parecer, indices, avaliacao_bp, finalidade_text)
         st.download_button(
             "📄 Baixar Relatorio (.txt)", data=txt_report,
-            file_name=f"risco_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            file_name=f"{_base_nome}.txt",
             mime="text/plain", use_container_width=True,
         )
     with dl2:
@@ -769,7 +868,7 @@ def _render_results(
             if pdf_buf:
                 st.download_button(
                     "📑 Baixar Relatorio (.pdf)", data=pdf_buf,
-                    file_name=f"risco_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    file_name=f"{_base_nome}.pdf",
                     mime="application/pdf", use_container_width=True,
                 )
         else:

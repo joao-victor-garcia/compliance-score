@@ -109,6 +109,7 @@ def generate_technical_opinion(
     indices: Optional[dict] = None,
     avaliacao_bp: Optional[dict] = None,
     finalidade_text: Optional[str] = None,
+    documento_modal_text: Optional[str] = None,
 ) -> str:
     """
     Gera o parecer tecnico via Anthropic API com base nos dados da analise.
@@ -197,6 +198,19 @@ def generate_technical_opinion(
     else:
         _finalidade_bloco = ""
 
+    # Bloco Documento Modal (Processo ou Contrato)
+    _modalidade = data.get("modalidade", "Financeira")
+    if documento_modal_text and _modalidade in ("Processual", "Contratual"):
+        _trunc_doc = documento_modal_text[:4000] + ("...[truncado]" if len(documento_modal_text) > 4000 else "")
+        _label_doc = "PROCESSO JUDICIAL/ADMINISTRATIVO" if _modalidade == "Processual" else "CONTRATO"
+        _documento_bloco = (
+            f"\n---\nDOCUMENTO DA MODALIDADE — {_label_doc}\n"
+            f"(Analise este documento para embasar o parecer sobre a garantia {_modalidade.lower()})\n---\n"
+            + _trunc_doc + "\n---\n"
+        )
+    else:
+        _documento_bloco = ""
+
     # Bloco Business Plan
     if modo_bp and avaliacao_bp:
         bp_peso = "30%" if modo_dre else "40%"
@@ -232,6 +246,8 @@ def generate_technical_opinion(
 Com base exclusivamente nos dados abaixo, redija um PARECER TÉCNICO formal em português.
 
 DADOS DA ANALISE
+Tipo de Pessoa               : {data.get('tipo_pessoa', 'N/D')}
+Modalidade da Garantia       : {_modalidade}
 Valor da Garantia Solicitada : R$ {data.get('valor_garantia', 0):,.2f}
 Tempo de Vigencia            : {data.get('tempo_vigencia', 0)} meses
 Metodologia                  : {_metodo}
@@ -249,7 +265,7 @@ RESULTADO FINAL
   Score Final    : {data.get('score_final', 0):.2f} / 100
   Classificacao  : {data.get('classificacao', 'N/D')}
 
-{_finalidade_bloco}
+{_finalidade_bloco}{_documento_bloco}
 CONVENCAO DAS ESCALAS - LEIA ANTES DE REDIGIR
 - Serasa (PF e PJ): escala 0-1000. Quanto MAIOR o score, MENOR o risco de inadimplencia.
 - Neoway Score de Compliance: escala 0-100. Quanto MENOR o score, MENOR o risco (melhor compliance).
@@ -264,9 +280,10 @@ Estruture o parecer com os seguintes topicos obrigatorios:
 {'3. ANALISE DOS INDICES FINANCEIROS (DRE/Balanco)' if modo_dre else '3. ANALISE DE COMPLIANCE'}
 {'4. ANALISE DO BUSINESS PLAN' if modo_bp else ''}
 {'5' if modo_bp else '4'}. ANALISE DE CAPACIDADE DE PAGAMENTO
-{'6' if modo_bp else '5'}. FATORES DE RISCO IDENTIFICADOS
-{'7' if modo_bp else '6'}. RECOMENDACAO (Aprovar / Aprovar com Condicionantes / Recusar)
-{'8' if modo_bp else '7'}. CONDICIONANTES E MITIGANTES (se aplicavel)
+{f"{'6' if modo_bp else '5'}. ANALISE DO DOCUMENTO {_modalidade.upper()} (obrigatorio — analise clausulas, obrigacoes, partes envolvidas, riscos especificos da modalidade)" if _documento_bloco else ''}
+{'7' if (modo_bp and _documento_bloco) else '6' if (_documento_bloco or modo_bp) else '5'}. FATORES DE RISCO IDENTIFICADOS
+{'8' if (modo_bp and _documento_bloco) else '7' if (_documento_bloco or modo_bp) else '6'}. RECOMENDACAO (Aprovar / Aprovar com Condicionantes / Recusar)
+{'9' if (modo_bp and _documento_bloco) else '8' if (_documento_bloco or modo_bp) else '7'}. CONDICIONANTES E MITIGANTES (se aplicavel)
 
 Seja objetivo, tecnico e fundamentado apenas nos dados fornecidos."""
 
